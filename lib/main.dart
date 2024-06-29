@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pento_flutter/auth.provider.dart';
-import 'package:pento_flutter/product_form.dart';
+import 'package:pento_flutter/guarded.dart';
 import 'package:pento_flutter/product_form.provider.dart';
 
 void main() {
@@ -14,10 +14,10 @@ class MyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
-      home: isAuthenticated(ref) ? FormPage() : LoginPage(),
+      home: isAuthenticated(ref) ? const ProductFormPage() : LoginPage(),
       routes: {
         '/login': (context) => LoginPage(),
-        '/form': (context) => GuardedPage(child: FormPage()),
+        '/form': (context) => const GuardedPage(child: ProductFormPage()),
       },
     );
   }
@@ -67,14 +67,43 @@ class LoginPage extends ConsumerWidget {
   }
 }
 
-class FormPage extends ConsumerWidget {
-  final TextEditingController nameController = TextEditingController();
-  final TextEditingController descriptionController = TextEditingController();
-
-  FormPage({super.key});
+class ProductFormPage extends ConsumerStatefulWidget {
+  const ProductFormPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  _ProductFormPageState createState() => _ProductFormPageState();
+}
+
+class _ProductFormPageState extends ConsumerState<ProductFormPage> {
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() => _fetchProduct());
+  }
+
+  Future<void> _fetchProduct() async {
+    try {
+      await ref.read(productFormProvider).fetchProduct(ref);
+      final product = ref.read(productFormProvider).product;
+      if (product != null) {
+        _nameController.text = product.name;
+        _descriptionController.text = product.description;
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load product')));
+    }
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final productFormNotifier = ref.watch(productFormProvider);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Submit Form')),
       body: Padding(
@@ -82,21 +111,26 @@ class FormPage extends ConsumerWidget {
         child: Column(
           children: [
             TextField(
-              controller: nameController,
+              controller: _nameController,
               decoration: const InputDecoration(labelText: 'Name'),
             ),
             TextField(
-              controller: descriptionController,
+              controller: _descriptionController,
               decoration: const InputDecoration(labelText: 'Description'),
             ),
             ElevatedButton(
               onPressed: () async {
+                if (productFormNotifier.isLoading) {
+                  return;
+                }
                 try {
                   final formData = {
-                    'name': nameController.text,
-                    'description': descriptionController.text,
+                    'product': {
+                      'name': _nameController.text,
+                      'description': _descriptionController.text,
+                    }
                   };
-                  await submitForm(ref, formData);
+                  await productFormNotifier.submitForm(ref, formData);
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                       content: Text('Form submitted successfully')));
                 } catch (e) {
@@ -104,7 +138,12 @@ class FormPage extends ConsumerWidget {
                       .showSnackBar(SnackBar(content: Text(e.toString())));
                 }
               },
-              child: const Text('Submit'),
+              child: productFormNotifier.isLoading
+                  ? const Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: CircularProgressIndicator(),
+                    )
+                  : const Text('Submit'),
             ),
           ],
         ),
